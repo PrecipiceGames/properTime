@@ -46,6 +46,7 @@ public final class properTime extends JavaPlugin{
 		double factornight = 1;
 		double factordawn = 1;
 		double factordusk = 1;
+		boolean skip = false;
 		Conf(World w){
 			this.w = w;
 		}
@@ -53,22 +54,11 @@ public final class properTime extends JavaPlugin{
 	}
 	
 		
-	@Override
 	public void onDisable() {
-		try {
-			for(int i = 0; i < configs.length; i++){
-				fixtimes[i].t.cancel();
-				fixtimes[i].join();
-				log.info("Thread "+ i + " successfully joined.");
-			}
-		} catch (InterruptedException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
+		this.getServer().getScheduler().cancelTasks(this);
 		log.info("[" + name + " " + version + "] signing off.");
 	}
 
-	@Override
 	public void onEnable() {
 		PluginDescriptionFile pd = this.getDescription();
 		name = pd.getName();
@@ -83,11 +73,11 @@ public final class properTime extends JavaPlugin{
 		
         log = Logger.getLogger("Minecraft");
         
-        File folder = new File("plugins" + File.separator + "properTime");
+        File folder = this.getDataFolder();
         if (!folder.exists()) {
             folder.mkdir();
         }
-        config = new File(folder.getAbsolutePath() + File.separator + "properTime.conf");
+        config = new File(folder, "properTime.conf");
 		
 		if (config.exists()){
 			try {
@@ -179,6 +169,11 @@ public final class properTime extends JavaPlugin{
 							}else {	c.perma = Integer.parseInt(split[1]);}
 							if (debug) log.info(/*"World " + c.w.getName() + ", */"time is now fixed to " + c.perma);
 						}
+					} else if (split[0].equalsIgnoreCase("skip")){
+						if (isValidWorld(c, lValidWorld) & isValidOrigin(c)) {
+							c.skip = Boolean.parseBoolean(split[1]);
+							if (debug) log.info(lCurrentWorld + " skip is now set to " + c.skip);
+						}
 					}
 				}
 				
@@ -191,9 +186,10 @@ public final class properTime extends JavaPlugin{
 						configs[i].factornight = defaultConf.factornight;
 						configs[i].factordawn = defaultConf.factordawn;
 						configs[i].factordusk = defaultConf.factordusk;
+						configs[i].skip = defaultConf.skip;
 					}
 					
-					fixtimes[i] = new FixTime(configs[i]);
+					fixtimes[i] = new FixTime(configs[i],this);
 				}
 			} catch (FileNotFoundException e) {
 				// TODO Auto-generated catch block
@@ -209,6 +205,7 @@ public final class properTime extends JavaPlugin{
 				out.write("# Use 2 for double speed, 3 for triple, etc.\n# At 1x speed, the complete day-night cycle takes 20 minutes.\n\n");
 				out.write("# To freeze the time, use perma = (value between 0 and 24000)\n# Or use perma = night or perma = day\n\n");
 				out.write("# To activate debug mode, uncomment the next line.\n# debug\n");
+				out.write("# To warp time all at once (usefull for redstone circuts), uncomment the next line.\n# skip true\n");
 				for(int i = 0; i < fixtimes.length; i++){
 					out.write("\nworld: \"" + server.getWorlds().get(i).getName() + "\"\n");
 					out.write("timespeedDay: 1.0\ntimespeedNight: 1.0\ntimespeedDusk: 1.0\ntimespeedDawn: 1.0\nperma: none\n");
@@ -223,11 +220,11 @@ public final class properTime extends JavaPlugin{
 			}
 			log.info(name +" started using defaults.");
 			for(int i = 0; i < configs.length; i++){
-				fixtimes[i] = new FixTime(configs[i]);
+				fixtimes[i] = new FixTime(configs[i], this);
 			}
 		}
 		for(int i = 0; i < configs.length; i++){
-			fixtimes[i].start();
+			fixtimes[i].run();
 		}
 		log.info(name + " " + version + " initialized");
 	}
@@ -269,7 +266,7 @@ public final class properTime extends JavaPlugin{
 	}
 	
 	
-	public final class FixTime extends Thread {
+	public final class FixTime implements Runnable{
 		public Timer t; // cancel this in ondisable!
 		
 		private int desiredStepDay;
@@ -279,6 +276,8 @@ public final class properTime extends JavaPlugin{
 		private World wrld;
 		private long lasttime;
 		private int perma = -1;
+
+		private JavaPlugin plugin;
 		
 		private int getStep(long a){
 			if ((a % 24000) < 12000){ // day
@@ -296,30 +295,23 @@ public final class properTime extends JavaPlugin{
 			}
 		}
 		
-		FixTime(Conf c){
+		FixTime(Conf c, JavaPlugin plugin){
 			desiredStepDawn = (int) (c.factordawn * defaultStep);
 			desiredStepDusk = (int) (c.factordusk * defaultStep);
 			desiredStepDay = (int) (c.factorday * defaultStep);
 			desiredStepNight = (int) (c.factornight * defaultStep);
 			wrld = c.w;
-			perma = c.perma; 
+			perma = c.perma;
+			this.plugin = plugin;
 		}
 		
 		public void run(){
-			t = new Timer();
-			t.schedule(new ttask(), stepSize * 1000, stepSize * 1000);
-		}
-		
-		private class ttask extends TimerTask{
-			public void run(){
-				getServer().getScheduler().callSyncMethod(self, new Step());
-			}
+			getServer().getScheduler().scheduleSyncRepeatingTask(this.plugin, new Step(), stepSize * 20 , stepSize * 20);
 		}
 		
 		
-		private final class Step implements Callable<Void>{
-			@Override
-			public Void call() {
+		private final class Step implements Runnable{
+			public void run() {
 				long ctime = wrld.getTime();
 				if (perma >= 0){
 					wrld.setTime(ctime - (ctime % 24000) + perma);
@@ -335,7 +327,7 @@ public final class properTime extends JavaPlugin{
 						lasttime = ctime;
 					}
 				}
-				return null;
+				return;
 			}
 			
 		}
